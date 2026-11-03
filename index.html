@@ -115,9 +115,9 @@ nav.tabs a.active { color:var(--ink); border-bottom-color:var(--signal); }
 .leg { display:grid; grid-template-columns:90px minmax(90px,140px) 1fr auto; gap:12px; align-items:center; background:var(--panel-2);
        border:1px solid var(--line-soft); border-radius:8px; padding:8px 10px; font-size:13px; }
 .leg .side { font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--ink-faint); }
-.leg .bk { font-weight:700; } .leg .sel { color:var(--ink-dim); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.leg .bk { font-weight:700; } .leg .bk a { text-decoration:none; color:var(--ink); } .leg .bk a:hover { color:var(--signal); } .leg .sel { color:var(--ink-dim); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .leg .od { font-family:var(--mono); font-variant-numeric:tabular-nums; white-space:nowrap; font-weight:700; }
-@media (max-width:600px) { .leg { grid-template-columns:70px 1fr auto; } .leg .sel { display:none; } }
+@media (max-width:600px) { .leg { grid-template-columns:70px 1fr auto; } .leg .sel { grid-column:1 / -1; order:3; white-space:normal; font-size:12px; } }
 .arb .foot { margin-top:8px; font-family:var(--mono); font-size:12px; color:var(--ink-dim); display:flex; gap:14px; flex-wrap:wrap; }
 .arb .foot b { color:var(--signal); }
 
@@ -390,18 +390,21 @@ function hbars(items, max) {
   return `<div class="hbars">` + items.map(i => `<div class="hbar" data-tip="${esc(i.tip || (i.label + ": " + nf(i.n)))}"><span class="lb">${i.label}</span><span class="tr"><i style="width:${(100 * i.n / max).toFixed(1)}%;background:${i.color || "var(--signal)"}"></i></span><span class="n">${nf(i.n)}</span></div>`).join("") + `</div>`;
 }
 
+const exLink = (ex, url) => url ? `<a href="${esc(url)}" target="_blank" rel="noopener" title="Open ${esc(ex)}">${esc(ex)} ↗</a>` : esc(ex);
+
 function arbCard(o) {
   const warn = (o.flags || []).some(f => f.includes("dicht"));
   const age = (S.st.generated_at || Date.now() / 1000) - o.first_seen;
-  const rk = o.risk || 0, rr = o.risk_reasons || [];
+  const rk = o.risk || 0, rr = o.risk_reasons || [], od = o.order || {};
   return `<div class="arb${warn || rk >= 2 ? " warn" : ""}">
     <div class="top"><div class="match">${esc(o.symbol)} ${riskPill(rk, rr)}${o.tradable ? '<span class="pill mine">mijn exchanges</span>' : ""}${o.source === "ws" ? '<span class="pill ws">⚡ live</span>' : ""}${flagPills(o.flags, o.suspect)}</div>
       <div class="pct">${pct(o.last_net_pct ?? o.first_net_pct)}</div></div>
     <div class="info">bestaat ${dur(age)} · piek ${pct(o.peak_net_pct)} · ${o.samples} updates · 24u-vol ${usdS(o.min_vol_usd)} · mcap ${usdS(o.mcap_usd)}</div>
     ${rr.length ? `<div class="why rk${rk}">⚠ ${rr.map(esc).join(" · ")}</div>` : ""}
+    <div class="info">💱 prijsverschil <b style="color:var(--ink)">${pct(o.gross_pct)}</b> bruto · Δ ${price(o.sell_price - o.buy_price)} ${esc(od.quote || "")}</div>
     <div class="legs">
-      <div class="leg"><span class="side">Koop</span><span class="bk">${esc(o.buy)}</span><span class="sel">ask</span><span class="od">${price(o.buy_price)}</span></div>
-      <div class="leg"><span class="side">Verkoop</span><span class="bk">${esc(o.sell)}</span><span class="sel">bid</span><span class="od">${price(o.sell_price)}</span></div>
+      <div class="leg"><span class="side">Koop</span><span class="bk">${exLink(o.buy, od.buy_url)}</span><span class="sel">${od.qty ? `${esc(od.qty)} ${esc(od.base)}${od.buy_limit ? " · limit ≤ " + esc(od.buy_limit) : ""}` : "ask"}</span><span class="od">${price(o.buy_price)}</span></div>
+      <div class="leg"><span class="side">Verkoop</span><span class="bk">${exLink(o.sell, od.sell_url)}</span><span class="sel">${od.qty ? `${esc(od.qty)} ${esc(od.base)}${od.sell_limit ? " · limit ≥ " + esc(od.sell_limit) : ""}` : "bid"}</span><span class="od">${price(o.sell_price)}</span></div>
     </div>
     <div class="foot"><span>uitvoerbaar ${usd(o.notional_usd, 0)}</span><span>winst ≈ <b>${usd(o.last_profit_usd ?? o.first_profit_usd)}</b></span><span>netto na fees</span>${alertPill(o.alert)}</div>
   </div>`;
@@ -496,9 +499,9 @@ function renderLog() {
   const rows = all.filter(r => (!q || (r.s + " " + r.b + " " + r.x).toLowerCase().includes(q)) && r.d >= md && r.n >= mn && (!tr || r.tr) && (sus || !r.sus) && (fl || !(r.f || []).some(f => f.includes("dicht"))) && (r.rk || 0) <= mr && (!onlyAl || (r.al || "").startsWith("verstuurd")));
   $("logmeta").textContent = `${rows.length} van ${all.length} recente kansen`;
   if (!rows.length) { $("log").innerHTML = `<tr><td><div class="empty" style="border:0">Geen kansen met deze filters.</div></td></tr>`; return; }
-  $("log").innerHTML = `<thead><tr><th>Tijd</th><th>Paar</th><th>Koop → verkoop</th><th class="num">Netto</th><th class="num">Piek</th><th class="num">Duur</th><th class="num">Uitvoerbaar</th><th class="num">Winst</th><th>Risico</th><th>Melding</th><th></th></tr></thead><tbody>` +
-    rows.slice(0, S.logN).map(r => `<tr><td class="mono">${tstr(r.t)}</td><td><b>${esc(r.s)}</b></td><td>${esc(r.b)} → ${esc(r.x)} ${r.tr ? '<span class="pill mine">mijn</span>' : ""}</td><td class="num hot">${pct(r.n)}</td><td class="num">${pct(r.pk)}</td><td class="num">${dur(r.d)}</td><td class="num">${usd(r.v, 0)}</td><td class="num">${usd(r.p)}</td><td data-tip="${esc([`24u-volume ${usdS(r.mv)} · marketcap ${usdS(r.mc)}`, ...(r.rr || [])].join("<br>"))}">${riskPill(r.rk, null, true)}</td><td>${alertPill(r.al)}</td><td>${flagPills(r.f, r.sus)}</td></tr>`).join("") + "</tbody>" +
-    (rows.length > S.logN ? `<tfoot><tr><td colspan="11" style="text-align:center"><button class="morebtn" id="more">toon meer (${rows.length - S.logN})</button></td></tr></tfoot>` : "");
+  $("log").innerHTML = `<thead><tr><th>Tijd</th><th>Paar</th><th>Koop → verkoop</th><th class="num">Prijsverschil</th><th class="num">Netto</th><th class="num">Piek</th><th class="num">Duur</th><th class="num">Uitvoerbaar</th><th class="num">Winst</th><th>Risico</th><th>Melding</th><th></th></tr></thead><tbody>` +
+    rows.slice(0, S.logN).map(r => `<tr><td class="mono">${tstr(r.t)}</td><td><b>${esc(r.s)}</b></td><td>${esc(r.b)} → ${esc(r.x)} ${r.tr ? '<span class="pill mine">mijn</span>' : ""}</td><td class="num" data-tip="${esc(`${r.b}: ${price(r.bp)} → ${r.x}: ${price(r.sp)}`)}">${pct(r.gp)}</td><td class="num hot">${pct(r.n)}</td><td class="num">${pct(r.pk)}</td><td class="num">${dur(r.d)}</td><td class="num">${usd(r.v, 0)}</td><td class="num">${usd(r.p)}</td><td data-tip="${esc([`24u-volume ${usdS(r.mv)} · marketcap ${usdS(r.mc)}`, ...(r.rr || [])].join("<br>"))}">${riskPill(r.rk, null, true)}</td><td>${alertPill(r.al)}</td><td>${flagPills(r.f, r.sus)}</td></tr>`).join("") + "</tbody>" +
+    (rows.length > S.logN ? `<tfoot><tr><td colspan="12" style="text-align:center"><button class="morebtn" id="more">toon meer (${rows.length - S.logN})</button></td></tr></tfoot>` : "");
   const mb = $("more"); if (mb) mb.onclick = () => { S.logN += 50; renderLog(); };
 }
 
