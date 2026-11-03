@@ -150,6 +150,19 @@ td.hot { color:var(--signal); font-weight:700; }
 .pill.mine { color:var(--signal); border-color:rgba(var(--signal-rgb),.45); }
 .pill.warn { color:var(--warn); border-color:rgba(240,162,75,.4); } .pill.bad { color:var(--neg); border-color:rgba(183,148,246,.45); }
 .pill.ws { color:var(--good); border-color:rgba(52,211,153,.35); }
+.pill.rk0 { color:#34d399; border-color:rgba(52,211,153,.4); } .pill.rk1 { color:#e8c547; border-color:rgba(232,197,71,.45); }
+.pill.rk2 { color:#f0a24b; border-color:rgba(240,162,75,.5); } .pill.rk3 { color:#ff6b6b; border-color:rgba(255,107,107,.55); background:rgba(255,107,107,.08); }
+.pill.al-ok { color:var(--good); border-color:rgba(52,211,153,.35); } .pill.al-no { color:var(--ink-faint); } .pill.al-err { color:var(--neg); border-color:rgba(183,148,246,.45); }
+.why { font-family:var(--mono); font-size:11.5px; color:var(--ink-dim); margin-top:6px; }
+.why.rk2 { color:#f0a24b; } .why.rk3 { color:#ff8a8a; }
+.hbars { display:grid; gap:7px; margin-top:10px; }
+.hbar { display:grid; grid-template-columns:minmax(110px,190px) 1fr 54px; gap:10px; align-items:center; font-size:12.5px; }
+.hbar .lb { color:var(--ink-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.hbar .tr { height:12px; background:var(--panel-2); border-radius:4px; overflow:hidden; }
+.hbar .tr i { display:block; height:100%; border-radius:4px; }
+.hbar .n { font-family:var(--mono); text-align:right; font-variant-numeric:tabular-nums; }
+.alertbox { margin-top:12px; padding:9px 12px; border-radius:9px; font-size:12.5px; border:1px solid var(--line); background:var(--panel-2); color:var(--ink-dim); }
+.alertbox.bad { border-color:rgba(183,148,246,.45); color:var(--neg); }
 .morebtn { font:inherit; font-family:var(--mono); font-size:12px; padding:8px 16px; border-radius:8px; border:1px solid var(--line); background:var(--panel-2); color:var(--signal); cursor:pointer; }
 
 /* ---------- filters ---------- */
@@ -354,20 +367,43 @@ function flagPills(f, sus) {
   (f || []).forEach(x => { if (x === "restart" || x === "stop") return; h += `<span class="pill warn" title="${esc(x)}">${x.startsWith("withdraw") ? "opnemen dicht" : x.startsWith("deposit") ? "storten dicht" : esc(x)}</span>`; });
   return h;
 }
-function telegramLink() { const ch = String(set().telegram_channel || ""); return ch.startsWith("@") ? "https://t.me/" + ch.slice(1) : ""; }
+function telegramLink() {
+  if (S.demo) return "";
+  const l = String(set().telegram_link || "");
+  if (/^https:\/\/t\.me\//.test(l)) return l;
+  const ch = String(set().telegram_channel || "");
+  return ch.startsWith("@") ? "https://t.me/" + ch.slice(1) : "";
+}
+
+const RISK = ["Laag", "Middel", "Hoog", "Zeer hoog"], RISK_IC = ["🟢", "🟡", "🟠", "🔴"], RISK_COL = ["#34d399", "#e8c547", "#f0a24b", "#ff6b6b"];
+const riskPill = (r, reasons, short) => `<span class="pill rk${r || 0}"${reasons && reasons.length ? ` title="${esc(reasons.join(" · "))}"` : ""}>${RISK_IC[r || 0]} ${short ? "" : "risico "}${RISK[r || 0].toLowerCase()}</span>`;
+function alertPill(a) {
+  if (!a) return "";
+  if (a.startsWith("verstuurd")) return `<span class="pill al-ok">🔔 gemeld</span>`;
+  if (a.startsWith("mislukt")) return `<span class="pill al-err" title="${esc(a)}">⚠️ melding mislukt</span>`;
+  if (a.startsWith("versturen")) return `<span class="pill al-ok">🔔 wordt gemeld</span>`;
+  return `<span class="pill al-no" title="niet gemeld: ${esc(a)}">🔕 ${esc(a)}</span>`;
+}
+const usdS = (v) => v == null ? "?" : v >= 1e9 ? "$" + nf(v / 1e9, 1) + "B" : v >= 1e6 ? "$" + nf(v / 1e6, 1) + "M" : v >= 1e3 ? "$" + nf(v / 1e3, 0) + "k" : "$" + nf(v, 0);
+function hbars(items, max) {
+  max = max || Math.max(1, ...items.map(i => i.n));
+  return `<div class="hbars">` + items.map(i => `<div class="hbar" data-tip="${esc(i.tip || (i.label + ": " + nf(i.n)))}"><span class="lb">${i.label}</span><span class="tr"><i style="width:${(100 * i.n / max).toFixed(1)}%;background:${i.color || "var(--signal)"}"></i></span><span class="n">${nf(i.n)}</span></div>`).join("") + `</div>`;
+}
 
 function arbCard(o) {
   const warn = (o.flags || []).some(f => f.includes("dicht"));
   const age = (S.st.generated_at || Date.now() / 1000) - o.first_seen;
-  return `<div class="arb${warn ? " warn" : ""}">
-    <div class="top"><div class="match">${esc(o.symbol)} ${o.tradable ? '<span class="pill mine">mijn exchanges</span>' : ""}${o.source === "ws" ? '<span class="pill ws">⚡ live</span>' : ""}${flagPills(o.flags, o.suspect)}</div>
+  const rk = o.risk || 0, rr = o.risk_reasons || [];
+  return `<div class="arb${warn || rk >= 2 ? " warn" : ""}">
+    <div class="top"><div class="match">${esc(o.symbol)} ${riskPill(rk, rr)}${o.tradable ? '<span class="pill mine">mijn exchanges</span>' : ""}${o.source === "ws" ? '<span class="pill ws">⚡ live</span>' : ""}${flagPills(o.flags, o.suspect)}</div>
       <div class="pct">${pct(o.last_net_pct ?? o.first_net_pct)}</div></div>
-    <div class="info">bestaat ${dur(age)} · piek ${pct(o.peak_net_pct)} · ${o.samples} updates</div>
+    <div class="info">bestaat ${dur(age)} · piek ${pct(o.peak_net_pct)} · ${o.samples} updates · 24u-vol ${usdS(o.min_vol_usd)} · mcap ${usdS(o.mcap_usd)}</div>
+    ${rr.length ? `<div class="why rk${rk}">⚠ ${rr.map(esc).join(" · ")}</div>` : ""}
     <div class="legs">
       <div class="leg"><span class="side">Koop</span><span class="bk">${esc(o.buy)}</span><span class="sel">ask</span><span class="od">${price(o.buy_price)}</span></div>
       <div class="leg"><span class="side">Verkoop</span><span class="bk">${esc(o.sell)}</span><span class="sel">bid</span><span class="od">${price(o.sell_price)}</span></div>
     </div>
-    <div class="foot"><span>volume ${usd(o.notional_usd, 0)}</span><span>winst ≈ <b>${usd(o.last_profit_usd ?? o.first_profit_usd)}</b></span><span>netto na fees</span></div>
+    <div class="foot"><span>uitvoerbaar ${usd(o.notional_usd, 0)}</span><span>winst ≈ <b>${usd(o.last_profit_usd ?? o.first_profit_usd)}</b></span><span>netto na fees</span>${alertPill(o.alert)}</div>
   </div>`;
 }
 
@@ -389,21 +425,34 @@ function renderHeader() {
   $("b-ex").textContent = `${E.filter(e => e.ok).length}/${E.length}`;
 }
 
+function alertBox() {
+  const a = S.st.alerts;
+  if (!a || S.demo) return "";
+  if (!a.enabled) return `<div class="alertbox bad">Telegram is niet gekoppeld: er worden geen meldingen verstuurd.</div>`;
+  let h = `🔔 Meldingen sinds start: <b>${nf(a.sent)}</b> verstuurd${a.failed ? ` · <b>${nf(a.failed)}</b> mislukt` : ""} · gaan naar ${a.to || "–"}`;
+  if (a.channel_error) h += `<br>⚠️ ${esc(a.channel_error)}`;
+  return `<div class="alertbox${a.channel_error || a.failed ? " bad" : ""}">${h}</div>`;
+}
+
 function renderHome() {
   const st = S.st, b = botState(), s = st.stats.today, d7 = st.stats.d7, tg = telegramLink();
   let h = `<div class="grid2">
     <div class="card status-card ${b.cls}"><div class="pulse"></div><div>
       <div class="kicker">Status</div><h2>${b.h}</h2><p>${b.p}</p>
       <div class="hb">laatste update ${S.st.heartbeat ? hms(S.st.heartbeat) : "–"} · gestart ${S.st.started_at ? ago(S.st.started_at) : "–"}</div>
-      ${tg ? `<a class="cta" href="${tg}" target="_blank" rel="noopener">✈︎ Volg het Telegram-kanaal</a>` : `<span class="cta off">Telegram-kanaal nog niet gekoppeld</span>`}
+      ${tg ? `<a class="cta" href="${esc(tg)}" target="_blank" rel="noopener">✈︎ Volg ${esc(set().telegram_title || "het Telegram-kanaal")}</a>` : `<span class="cta off">Telegram-kanaal ${S.demo ? "(demo)" : "nog niet gekoppeld"}</span>`}
     </div></div>
     <div class="card"><div class="kicker" style="margin-bottom:10px">Alert-criteria</div><div class="feed">
       <div class="ln"><span>Inzet per arb</span><b>${usd(set().stake_usd ?? set().max_notional_usd, 0)}</b></div>
       <div class="ln"><span>Melding vanaf netto</span><b>${pct(set().alert_min_net_pct)}</b></div>
       <div class="ln"><span>Minimale winst</span><b>${usd(set().alert_min_profit_usd)}</b></div>
       <div class="ln"><span>Kans bestaat minstens</span><b>${set().alert_min_age_s ? dur(set().alert_min_age_s) : "direct"}</b></div>
+      <div class="ln"><span>Risico t/m</span><b>${RISK_IC[set().alert_max_risk ?? 3]} ${RISK[set().alert_max_risk ?? 3]}</b></div>
+      <div class="ln"><span>Coins: min. 24u-volume</span><b>${set().min_leg_volume_usd ? usdS(set().min_leg_volume_usd) : "geen filter"}</b></div>
+      <div class="ln"><span>Coins: min. marketcap</span><b>${set().min_market_cap_usd ? usdS(set().min_market_cap_usd) : "geen filter"}</b></div>
       <div class="ln"><span>Meetdrempel</span><b>${pct(set().min_net_pct)}</b></div>
-    </div></div></div>
+    </div>${alertBox()}</div></div>
+
     <div class="tiles">
       <div class="tile"><div class="kicker">Kansen vandaag</div><div class="big hot">${nf(s.events)}</div><div class="small">${nf(s.count)} routes · 7d: ${nf((d7.events || 0) / 7, 1)}/dag</div></div>
       <div class="tile"><div class="kicker">Mediaan netto</div><div class="big">${pct(s.median_net_pct)}</div><div class="small">piek ${pct(s.median_peak_pct)}</div></div>
@@ -429,24 +478,27 @@ function renderKansen() {
       <input type="search" id="q" placeholder="Zoek paar of exchange…">
       <select id="fdur"><option value="0">Elke duur</option><option value="0.5">≥ 0,5s</option><option value="1">≥ 1s</option><option value="3">≥ 3s</option><option value="10">≥ 10s</option><option value="60">≥ 1 min</option></select>
       <select id="fnet"><option value="0">Elk rendement</option><option value="0.2">≥ 0,2%</option><option value="0.3">≥ 0,3%</option><option value="0.5">≥ 0,5%</option><option value="1">≥ 1%</option></select>
+      <select id="frisk"><option value="3">Elk risico</option><option value="2">t/m 🟠 hoog</option><option value="1">t/m 🟡 middel</option><option value="0">alleen 🟢 laag</option></select>
+      <label><input type="checkbox" id="fal"> alleen gemeld</label>
       <label><input type="checkbox" id="ftr"> alleen mijn exchanges</label>
       <label><input type="checkbox" id="fsus"> toon verdachte</label>
       <label><input type="checkbox" id="ffl" checked> toon met transfer-waarschuwing</label>
     </div><div class="tablewrap"><table id="log"></table></div>`;
   $("tab-kansen").innerHTML = h;
-  ["q", "fdur", "fnet", "ftr", "fsus", "ffl"].forEach(id => $(id).addEventListener("input", () => { S.logN = 50; renderLog(); }));
+  ["q", "fdur", "fnet", "frisk", "fal", "ftr", "fsus", "ffl"].forEach(id => $(id).addEventListener("input", () => { S.logN = 50; renderLog(); }));
   renderLog();
 }
 function renderLog() {
   const q = $("q").value.trim().toLowerCase(), md = +$("fdur").value, mn = +$("fnet").value;
   const tr = $("ftr").checked, sus = $("fsus").checked, fl = $("ffl").checked;
+  const mr = +$("frisk").value, onlyAl = $("fal").checked;
   const all = S.st.recent || [];
-  const rows = all.filter(r => (!q || (r.s + " " + r.b + " " + r.x).toLowerCase().includes(q)) && r.d >= md && r.n >= mn && (!tr || r.tr) && (sus || !r.sus) && (fl || !(r.f || []).some(f => f.includes("dicht"))));
+  const rows = all.filter(r => (!q || (r.s + " " + r.b + " " + r.x).toLowerCase().includes(q)) && r.d >= md && r.n >= mn && (!tr || r.tr) && (sus || !r.sus) && (fl || !(r.f || []).some(f => f.includes("dicht"))) && (r.rk || 0) <= mr && (!onlyAl || (r.al || "").startsWith("verstuurd")));
   $("logmeta").textContent = `${rows.length} van ${all.length} recente kansen`;
   if (!rows.length) { $("log").innerHTML = `<tr><td><div class="empty" style="border:0">Geen kansen met deze filters.</div></td></tr>`; return; }
-  $("log").innerHTML = `<thead><tr><th>Tijd</th><th>Paar</th><th>Koop → verkoop</th><th class="num">Netto</th><th class="num">Piek</th><th class="num">Duur</th><th class="num">Volume</th><th class="num">Winst</th><th></th></tr></thead><tbody>` +
-    rows.slice(0, S.logN).map(r => `<tr><td class="mono">${tstr(r.t)}</td><td><b>${esc(r.s)}</b></td><td>${esc(r.b)} → ${esc(r.x)} ${r.tr ? '<span class="pill mine">mijn</span>' : ""}</td><td class="num hot">${pct(r.n)}</td><td class="num">${pct(r.pk)}</td><td class="num">${dur(r.d)}</td><td class="num">${usd(r.v, 0)}</td><td class="num">${usd(r.p)}</td><td>${flagPills(r.f, r.sus)}</td></tr>`).join("") + "</tbody>" +
-    (rows.length > S.logN ? `<tfoot><tr><td colspan="9" style="text-align:center"><button class="morebtn" id="more">toon meer (${rows.length - S.logN})</button></td></tr></tfoot>` : "");
+  $("log").innerHTML = `<thead><tr><th>Tijd</th><th>Paar</th><th>Koop → verkoop</th><th class="num">Netto</th><th class="num">Piek</th><th class="num">Duur</th><th class="num">Uitvoerbaar</th><th class="num">Winst</th><th>Risico</th><th>Melding</th><th></th></tr></thead><tbody>` +
+    rows.slice(0, S.logN).map(r => `<tr><td class="mono">${tstr(r.t)}</td><td><b>${esc(r.s)}</b></td><td>${esc(r.b)} → ${esc(r.x)} ${r.tr ? '<span class="pill mine">mijn</span>' : ""}</td><td class="num hot">${pct(r.n)}</td><td class="num">${pct(r.pk)}</td><td class="num">${dur(r.d)}</td><td class="num">${usd(r.v, 0)}</td><td class="num">${usd(r.p)}</td><td data-tip="${esc([`24u-volume ${usdS(r.mv)} · marketcap ${usdS(r.mc)}`, ...(r.rr || [])].join("<br>"))}">${riskPill(r.rk, null, true)}</td><td>${alertPill(r.al)}</td><td>${flagPills(r.f, r.sus)}</td></tr>`).join("") + "</tbody>" +
+    (rows.length > S.logN ? `<tfoot><tr><td colspan="11" style="text-align:center"><button class="morebtn" id="more">toon meer (${rows.length - S.logN})</button></td></tr></tfoot>` : "");
   const mb = $("more"); if (mb) mb.onclick = () => { S.logN += 50; renderLog(); };
 }
 
@@ -460,9 +512,9 @@ function renderAnalyse() {
     <div class="tile"><div class="kicker">Mediaan duur</div><div class="big">${dur(s.median_duration_s)}</div><div class="small">p75 ${dur(s.p75_duration_s)} · p90 ${dur(s.p90_duration_s)}</div></div>
     <div class="tile"><div class="kicker">Pakbaar ≥ ${nf(E)}s</div><div class="big">${s.share_exec == null ? "–" : nf(s.share_exec * 100) + "%"}</div><div class="small">${nf(s.count_exec)} van ${nf(s.count)} routes</div></div>
     <div class="tile"><div class="kicker">Winst per kans</div><div class="big">${usd(s.median_profit_usd)}</div><div class="small">mediaan · ${usd(s.median_notional_usd, 0)} volume</div></div>
-    <div class="tile"><div class="kicker">Theoretische winst</div><div class="big">${usd(s.sum_profit_events_usd, 0)}</div><div class="small">alle events</div></div>
-    <div class="tile"><div class="kicker">Pakbare winst</div><div class="big hot">${usd(s.sum_profit_exec_usd, 0)}</div><div class="small">routes ≥ ${nf(E)}s</div></div>
-    <div class="tile"><div class="kicker">Mijn exchanges</div><div class="big">${nf(s.count_tradable)}</div><div class="small">routes op beide kanten</div></div>
+    <div class="tile"><div class="kicker">🟢🟡 Laag/middel risico</div><div class="big">${s.count ? nf(100 * (s.count_low_risk || 0) / s.count) + "%" : "–"}</div><div class="small">${nf(s.count_low_risk)} van ${nf(s.count)} routes</div></div>
+    <div class="tile"><div class="kicker">Pakbare winst</div><div class="big hot">${usd(s.sum_profit_low_risk_exec_usd, 0)}</div><div class="small">≥ ${nf(E)}s én laag/middel risico · alles: ${usd(s.sum_profit_exec_usd, 0)}</div></div>
+    <div class="tile"><div class="kicker">Gemeld via Telegram</div><div class="big">${nf(s.alerted)}</div><div class="small">routes · mijn exchanges: ${nf(s.count_tradable)}</div></div>
   </div>`;
   h += sectionHead("Hoeveel en wanneer");
   h += `<div class="charts2">
@@ -471,6 +523,14 @@ function renderAnalyse() {
     <div class="chart"><h4>Pakbare winst per dag</h4><div class="sub">theoretisch, kansen ≥ ${nf(E)}s, bij ${usd(set().stake_usd ?? set().max_notional_usd, 0)} inzet</div><div class="plot" id="c_profit"></div></div>
     <div class="chart"><h4>Kansen per uur</h4><div class="sub">laatste 48 uur</div><div class="plot" id="c_hour"></div></div>
     <div class="chart"><h4>Op welk uur ontstaan ze?</h4><div class="sub">7 dagen · lokale tijd</div><div class="plot" id="c_hod"></div></div>
+  </div>`;
+  h += sectionHead("Risico en meldingen");
+  const rh = st.risk_hist || [], reasons = Object.entries((st.alerts || {}).reasons_24h || {});
+  h += `<div class="charts2">
+    <div class="chart"><h4>Risico-verdeling</h4><div class="sub">7 dagen · op volume, marketcap, transfers, diepte en spread</div>
+      ${hbars(rh.map((b, i) => ({ label: `${RISK_IC[i]} ${b.label}`, n: b.count, color: RISK_COL[i] })))}</div>
+    <div class="chart"><h4>Waarom wel/niet gemeld?</h4><div class="sub">laatste 24 uur · afgesloten kansen per uitkomst</div>
+      ${reasons.length ? hbars(reasons.slice(0, 8).map(([k, n]) => ({ label: esc(k), n, tip: esc(k) + ": " + nf(n), color: k.startsWith("verstuurd") ? "#34d399" : k.startsWith("mislukt") ? "#b794f6" : "var(--muted-bar)" }))) : `<div class="empty" style="margin-top:10px">${S.demo ? "Niet in demo-data" : "Nog geen data"}</div>`}</div>
   </div>`;
   h += sectionHead("Hoe groot en hoe snel weg");
   h += `<div class="charts3">
@@ -506,8 +566,8 @@ function drawAnalyse() {
 
 function renderRoutes() {
   const E = execS();
-  const head = (n) => `<thead><tr><th>${n}</th><th class="num">Aantal</th><th class="num">≥${nf(E)}s</th><th class="num">Med. netto</th><th class="num">Med. duur</th><th class="num">Winst</th></tr></thead>`;
-  const row = (r) => `<tr><td><b>${esc(r.key)}</b></td><td class="num">${nf(r.count)}</td><td class="num">${nf(r.count_exec)}</td><td class="num">${pct(r.median_net_pct)}</td><td class="num">${dur(r.median_duration_s)}</td><td class="num hot">${usd(r.sum_profit_usd)}</td></tr>`;
+  const head = (n) => `<thead><tr><th>${n}</th><th>Risico</th><th class="num">Aantal</th><th class="num">≥${nf(E)}s</th><th class="num">Med. netto</th><th class="num">Med. duur</th><th class="num">Winst</th></tr></thead>`;
+  const row = (r) => `<tr><td><b>${esc(r.key)}</b></td><td>${riskPill(r.risk_med ?? 0, null, true)}</td><td class="num">${nf(r.count)}</td><td class="num">${nf(r.count_exec)}</td><td class="num">${pct(r.median_net_pct)}</td><td class="num">${dur(r.median_duration_s)}</td><td class="num hot">${usd(r.sum_profit_usd)}</td></tr>`;
   const R = S.st.top_routes || [], Y = S.st.top_symbols || [];
   let h = sectionHead("Top routes · 7 dagen", `<span class="muted">koop → verkoop, op theoretische winst</span>`);
   h += R.length ? `<div class="tablewrap"><table>${head("Route")}<tbody>${R.map(row).join("")}</tbody></table></div>` : `<div class="empty">Nog geen data</div>`;
@@ -544,6 +604,17 @@ function renderUitleg() {
     <li><b>Theoretische winst</b> gaat ervan uit dat je op beide exchanges al voorraad hebt, direct instapt en precies die prijzen krijgt. In de praktijk ligt hij lager: latency, gemiste fills, kosten om je voorraad terug te verschuiven en kapitaal dat stilstaat.</li>
     <li><b>Verdacht</b> = boven ${nf(s.suspect_net_pct)}% netto. Bijna altijd een andere munt met dezelfde ticker, of opnemen/storten dicht. Telt niet mee in de statistieken.</li>
     <li><b>Opnemen/storten dicht</b>: je kunt je voorraad dan niet terugzetten. Vaak is dát precies waarom de spread bestaat.</li>
+  </ul></div>` + sectionHead("Risico-labels") + `<div class="card note"><ul>
+    <li>Elke kans krijgt een label: ${[0, 1, 2, 3].map(i => riskPill(i, null)).join(" ")}. Het slechtste onderdeel bepaalt het label; wijs met je muis een label aan voor de redenen.</li>
+    <li><b>24u-volume</b> (laagste van de twee exchanges): onder $50k zeer hoog, onder $250k hoog, onder $1M middel. Weinig handel = grote slippage, makkelijk te manipuleren, en vaak een nep-spread.</li>
+    <li><b>Marketcap</b> (CoinGecko, top-2000): onder $10M zeer hoog, onder $50M hoog, onder $250M middel. Buiten de top-2000 = hoog. Kleine munten: pump/dump, delistings, of een andere munt met dezelfde ticker.</li>
+    <li><b>Opnemen/storten dicht</b> = zeer hoog. <b>Spread boven 3%</b> = hoog (te mooi om waar te zijn). <b>Dun orderboek</b> (minder dan de helft van je inzet uitvoerbaar) = middel.</li>
+    <li>Instellen via Telegram (⚙️ Instellingen): <b>🚦 Max. risico</b> bepaalt welke kansen gemeld worden (nu t/m ${RISK[s.alert_max_risk ?? 3].toLowerCase()}). <b>📊 Min. 24u-volume</b> en <b>🏛 Min. marketcap</b> bepalen welke coins überhaupt gemeten worden.</li>
+    <li>Kanttekening: marketcap wordt op ticker gekoppeld. Bestaan er twee munten met dezelfde ticker, dan gebruiken we de grootste, dus het label kan dan te gunstig zijn.</li>
+  </ul></div>` + sectionHead("Waarom wel of geen melding?") + `<div class="card note"><ul>
+    <li>Bij elke kans staat 🔔 <b>gemeld</b> of 🔕 met de reden: bijvoorbeeld netto onder de drempel, risico te hoog, opnemen dicht, cooldown, of "bestond korter dan Xs".</li>
+    <li>Het dashboard toont <b>alles vanaf ${pct(s.min_net_pct)}</b> (de meetdrempel). Telegram meldt alleen wat aan al je alert-criteria voldoet.</li>
+    <li>In Telegram geeft <b>🩺 Diagnose</b> hetzelfde overzicht, en <b>🔔 Test-alert</b> controleert of berichten aankomen.</li>
   </ul></div>`;
 }
 
