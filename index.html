@@ -212,6 +212,7 @@ footer { margin-top:36px; font-family:var(--mono); font-size:11.5px; color:var(-
     <a href="#home" data-tab="home">Home</a>
     <a href="#kansen" data-tab="kansen">Kansen <span class="badge hot" id="b-open">0 open</span></a>
     <a href="#analyse" data-tab="analyse">Analyse</a>
+    <a href="#strategie" data-tab="strategie">Strategie <span class="badge hot" id="b-play">–</span></a>
     <a href="#routes" data-tab="routes">Routes</a>
     <a href="#exchanges" data-tab="exchanges">Exchanges <span class="badge" id="b-ex">–</span></a>
     <a href="#uitleg" data-tab="uitleg">Uitleg</a>
@@ -220,6 +221,7 @@ footer { margin-top:36px; font-family:var(--mono); font-size:11.5px; color:var(-
   <section id="tab-home"></section>
   <section id="tab-kansen" hidden></section>
   <section id="tab-analyse" hidden></section>
+  <section id="tab-strategie" hidden></section>
   <section id="tab-routes" hidden></section>
   <section id="tab-exchanges" hidden></section>
   <section id="tab-uitleg" hidden></section>
@@ -305,7 +307,7 @@ function barChart(el, labels, series, o = {}) {
   const W = Math.max(260, el.clientWidth), H = o.height || 180, m = { l: 40, r: 4, t: 8, b: 22 };
   const n = labels.length, iw = W - m.l - m.r, ih = H - m.t - m.b;
   const totals = labels.map((_, i) => series.reduce((s, se) => s + (se.values[i] || 0), 0));
-  const ymax = niceMax(Math.max(...totals, 0) / 4, !o.money) * 4;
+  const ymax = o.ymax || niceMax(Math.max(...totals, 0) / 4, !o.money) * 4;
   const step = iw / Math.max(1, n), bw = Math.max(2, Math.min(34, step * 0.7)), gap = 2;
   let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(o.aria || "")}">`;
   for (let k = 0; k <= 4; k++) {
@@ -406,6 +408,7 @@ function arbCard(o) {
       <div class="leg"><span class="side">Koop</span><span class="bk">${exLink(o.buy, od.buy_url)}</span><span class="sel">${od.qty ? `${esc(od.qty)} ${esc(od.base)}${od.buy_limit ? " · limit ≤ " + esc(od.buy_limit) : ""}` : "ask"}</span><span class="od">${price(o.buy_price)}</span></div>
       <div class="leg"><span class="side">Verkoop</span><span class="bk">${exLink(o.sell, od.sell_url)}</span><span class="sel">${od.qty ? `${esc(od.qty)} ${esc(od.base)}${od.sell_limit ? " · limit ≥ " + esc(od.sell_limit) : ""}` : "bid"}</span><span class="od">${price(o.sell_price)}</span></div>
     </div>
+    ${execLine(o)}
     <div class="foot"><span>uitvoerbaar ${usd(o.notional_usd, 0)}</span><span>winst ≈ <b>${usd(o.last_profit_usd ?? o.first_profit_usd)}</b></span><span>netto na fees</span>${alertPill(o.alert)}</div>
   </div>`;
 }
@@ -424,6 +427,8 @@ function renderHeader() {
   ].map(x => `<span>${x}</span>`).join("");
   $("banner").innerHTML = S.demo ? `<div class="banner"><b>Demo:</b> verzonnen voorbeeldgetallen. Zodra je scanner draait zie je hier de echte metingen.</div>` : "";
   $("b-open").textContent = (st.live || []).length + " open";
+  const pb = (st.playable || {}).d7;
+  $("b-play").textContent = pb ? nf(pb.events) + " speelbaar" : "–";
   const E = st.exchanges || [];
   $("b-ex").textContent = `${E.filter(e => e.ok).length}/${E.length}`;
 }
@@ -482,26 +487,27 @@ function renderKansen() {
       <select id="fdur"><option value="0">Elke duur</option><option value="0.5">≥ 0,5s</option><option value="1">≥ 1s</option><option value="3">≥ 3s</option><option value="10">≥ 10s</option><option value="60">≥ 1 min</option></select>
       <select id="fnet"><option value="0">Elk rendement</option><option value="0.2">≥ 0,2%</option><option value="0.3">≥ 0,3%</option><option value="0.5">≥ 0,5%</option><option value="1">≥ 1%</option></select>
       <select id="frisk"><option value="3">Elk risico</option><option value="2">t/m 🟠 hoog</option><option value="1">t/m 🟡 middel</option><option value="0">alleen 🟢 laag</option></select>
+      <label><input type="checkbox" id="fpl"> alleen speelbaar</label>
       <label><input type="checkbox" id="fal"> alleen gemeld</label>
       <label><input type="checkbox" id="ftr"> alleen mijn exchanges</label>
       <label><input type="checkbox" id="fsus"> toon verdachte</label>
       <label><input type="checkbox" id="ffl" checked> toon met transfer-waarschuwing</label>
     </div><div class="tablewrap"><table id="log"></table></div>`;
   $("tab-kansen").innerHTML = h;
-  ["q", "fdur", "fnet", "frisk", "fal", "ftr", "fsus", "ffl"].forEach(id => $(id).addEventListener("input", () => { S.logN = 50; renderLog(); }));
+  ["q", "fdur", "fnet", "frisk", "fpl", "fal", "ftr", "fsus", "ffl"].forEach(id => $(id).addEventListener("input", () => { S.logN = 50; renderLog(); }));
   renderLog();
 }
 function renderLog() {
   const q = $("q").value.trim().toLowerCase(), md = +$("fdur").value, mn = +$("fnet").value;
   const tr = $("ftr").checked, sus = $("fsus").checked, fl = $("ffl").checked;
-  const mr = +$("frisk").value, onlyAl = $("fal").checked;
+  const mr = +$("frisk").value, onlyAl = $("fal").checked, onlyPl = $("fpl").checked;
   const all = S.st.recent || [];
-  const rows = all.filter(r => (!q || (r.s + " " + r.b + " " + r.x).toLowerCase().includes(q)) && r.d >= md && r.n >= mn && (!tr || r.tr) && (sus || !r.sus) && (fl || !(r.f || []).some(f => f.includes("dicht"))) && (r.rk || 0) <= mr && (!onlyAl || (r.al || "").startsWith("verstuurd")));
+  const rows = all.filter(r => (!q || (r.s + " " + r.b + " " + r.x).toLowerCase().includes(q)) && r.d >= md && r.n >= mn && (!tr || r.tr) && (sus || !r.sus) && (fl || !(r.f || []).some(f => f.includes("dicht"))) && (r.rk || 0) <= mr && (!onlyAl || (r.al || "").startsWith("verstuurd")) && (!onlyPl || r.pl));
   $("logmeta").textContent = `${rows.length} van ${all.length} recente kansen`;
   if (!rows.length) { $("log").innerHTML = `<tr><td><div class="empty" style="border:0">Geen kansen met deze filters.</div></td></tr>`; return; }
-  $("log").innerHTML = `<thead><tr><th>Tijd</th><th>Paar</th><th>Koop → verkoop</th><th class="num">Prijsverschil</th><th class="num">Netto</th><th class="num">Piek</th><th class="num">Duur</th><th class="num">Uitvoerbaar</th><th class="num">Winst</th><th>Risico</th><th>Melding</th><th></th></tr></thead><tbody>` +
-    rows.slice(0, S.logN).map(r => `<tr><td class="mono">${tstr(r.t)}</td><td><b>${esc(r.s)}</b></td><td>${esc(r.b)} → ${esc(r.x)} ${r.tr ? '<span class="pill mine">mijn</span>' : ""}</td><td class="num" data-tip="${esc(`${r.b}: ${price(r.bp)} → ${r.x}: ${price(r.sp)}`)}">${pct(r.gp)}</td><td class="num hot">${pct(r.n)}</td><td class="num">${pct(r.pk)}</td><td class="num">${dur(r.d)}</td><td class="num">${usd(r.v, 0)}</td><td class="num">${usd(r.p)}</td><td data-tip="${esc([`24u-volume ${usdS(r.mv)} · marketcap ${usdS(r.mc)}`, ...(r.rr || [])].join("<br>"))}">${riskPill(r.rk, null, true)}</td><td>${alertPill(r.al)}</td><td>${flagPills(r.f, r.sus)}</td></tr>`).join("") + "</tbody>" +
-    (rows.length > S.logN ? `<tfoot><tr><td colspan="12" style="text-align:center"><button class="morebtn" id="more">toon meer (${rows.length - S.logN})</button></td></tr></tfoot>` : "");
+  $("log").innerHTML = `<thead><tr><th>Tijd</th><th>Paar</th><th>Koop → verkoop</th><th class="num">Prijsverschil</th><th class="num">Netto</th><th class="num">Piek</th><th class="num">Duur</th><th class="num">Na ${latLab()}</th><th class="num">Uitvoerbaar</th><th class="num">Winst</th><th class="num">Leg-risico</th><th>Risico</th><th>Melding</th><th></th></tr></thead><tbody>` +
+    rows.slice(0, S.logN).map(r => `<tr><td class="mono">${tstr(r.t)}</td><td><b>${esc(r.s)}</b></td><td>${esc(r.b)} → ${esc(r.x)} ${r.tr ? '<span class="pill mine">mijn</span>' : ""}</td><td class="num" data-tip="${esc(`${r.b}: ${price(r.bp)} → ${r.x}: ${price(r.sp)}`)}">${pct(r.gp)}</td><td class="num hot">${pct(r.n)}</td><td class="num">${pct(r.pk)}</td><td class="num">${dur(r.d)}</td><td class="num${r.pl ? " hot" : ""}" data-tip="${esc(r.pl ? "speelbaar: winst na latency " + usd(r.lp) : r.ln === 0 ? "al weg na " + latLab() : "niet speelbaar (risico/transfers/te klein)")}">${r.ln == null ? "–" : r.ln === 0 ? "weg" : pct(r.ln)}</td><td class="num">${usd(r.v, 0)}</td><td class="num">${usd(r.p)}</td><td class="num" data-tip="${esc("één been direct terugdraaien kost dit" + (r.wf != null ? " · opname " + usd(r.wf) : ""))}">${r.uw == null ? "–" : nf(r.uw, 2) + "%"}</td><td data-tip="${esc([`24u-volume ${usdS(r.mv)} · marketcap ${usdS(r.mc)}`, ...(r.rr || [])].join("<br>"))}">${riskPill(r.rk, null, true)}</td><td>${alertPill(r.al)}</td><td>${flagPills(r.f, r.sus)}</td></tr>`).join("") + "</tbody>" +
+    (rows.length > S.logN ? `<tfoot><tr><td colspan="14" style="text-align:center"><button class="morebtn" id="more">toon meer (${rows.length - S.logN})</button></td></tr></tfoot>` : "");
   const mb = $("more"); if (mb) mb.onclick = () => { S.logN += 50; renderLog(); };
 }
 
@@ -567,6 +573,90 @@ function drawAnalyse() {
   scatter($("c_sc"), pts, { exec: E });
 }
 
+// ---------------------------------------------------------------- uitvoerbaarheid
+const PB = () => S.st.playable || null;
+const rules = () => (PB() || {}).rules || { latency_ms: 500, max_risk: 1, require_transfers_open: true, min_net_pct: 0.1 };
+const latLab = () => { const ms = rules().latency_ms; return ms >= 1000 ? nf(ms / 1000, 1) + "s" : nf(ms) + " ms"; };
+const beRate = (net, uw) => uw == null || net == null || net + uw <= 0 ? null : net / (net + uw);
+function execLine(o) {
+  const bits = [];
+  const lad = o.ladder || [];
+  if (lad.length) bits.push("📐 " + lad.filter((x, i) => i % 2 === 1 || i === lad.length - 1).slice(0, 3).map(x => `${usdS(x[0])}: ${x[1] < x[0] * 0.95 ? `<span data-tip="${esc("boek/spread op bij " + usd(x[1], 0))}" style="color:var(--warn)">${usd(x[2])}</span>` : usd(x[2])}`).join(" · "));
+  if (o.unwind_pct != null) { const be = beRate(o.last_net_pct ?? o.first_net_pct, o.unwind_pct); bits.push(`🦵 terugdraaien ${nf(o.unwind_pct, 2)}%${be != null ? ` · break-even ${nf(be * 100)}% gemist` : ""}`); }
+  if (o.wd_fee_usd != null) bits.push(`🔁 opname ${usd(o.wd_fee_usd)}`);
+  return bits.length ? `<div class="info" style="margin-top:8px">${bits.join(" &nbsp;·&nbsp; ")}</div>` : "";
+}
+const pairName = (p) => `${esc(p.a)} ⇄ ${esc(p.b)}`;
+
+function renderStrategie() {
+  const st = S.st, pb = PB();
+  if (!pb) { $("tab-strategie").innerHTML = `<div class="empty">Deze data komt pas binnen na de update van de scanner (schema 2).</div>`; return; }
+  const r = rules(), w = pb[S.win] || pb.d7 || {};
+  const extrap = (w.days || 0) < 1;
+  const pairs = pb.pairs || [], best = pairs.find(p => p.playable) || null;
+  let h = `<div class="card note" style="margin-top:4px"><b>Hoe speel je dit?</b> Deze tab rekent de kansen om naar wat een bot er in de praktijk van zou halen.
+    Een kans telt als <b>speelbaar</b> als hij na <b>${latLab()}</b> (de tijd voordat jouw order op de beurs ligt) nog minstens ${pct(r.min_net_pct)} netto oplevert,
+    het risico t/m ${RISK[r.max_risk ?? 1].toLowerCase()} is${r.require_transfers_open ? ", en opnemen/storten open staat" : ""}${r.only_tradable ? ", op exchanges waar je een account hebt" : ""}.
+    De winst is wat er na die latency nog stond. Instellen onder <code>playable:</code> in config.yaml.</div>`;
+  h += sectionHead("Speelbaar", `<div class="seg" id="win2">${[["today", "Vandaag"], ["h24", "24 uur"], ["d7", "7 dagen"], ["d30", "30 dagen"]].map(([k, l]) => `<button data-w="${k}" class="${k === S.win ? "active" : ""}">${l}</button>`).join("")}</div>`);
+  h += `<div class="tiles" style="margin-top:0">
+    <div class="tile"><div class="kicker">Speelbare kansen</div><div class="big hot">${nf(w.events)}</div><div class="small">${extrap ? "te weinig meettijd voor /dag" : "≈ " + nf(w.per_day, 1) + " per dag"} · ${w.share == null ? "–" : nf(w.share * 100) + "% van alles"}</div></div>
+    <div class="tile"><div class="kicker">Speelbare winst</div><div class="big hot">${usd(w.profit_usd, 0)}</div><div class="small">${extrap ? "over " + nf(w.days * 24, 1) + " uur meten" : "≈ " + usd(w.profit_per_day) + " per dag"} · inzet ${usd(set().stake_usd ?? set().max_notional_usd, 0)}</div></div>
+    <div class="tile"><div class="kicker">Beste exchange-paar</div><div class="big" style="font-size:19px;margin:12px 0 8px">${best ? pairName(best) : "–"}</div><div class="small">${best ? `${usd(best.profit_per_day)}/dag · ${best.both_ways ? "beide kanten op" : "vooral één kant op"}` : "nog geen speelbare kansen"}</div></div>
+    <div class="tile"><div class="kicker">Leg-risico (mediaan)</div><div class="big">${pb.median_unwind_pct == null ? "–" : nf(pb.median_unwind_pct, 2) + "%"}</div><div class="small">kosten om 1 gevuld been terug te draaien</div></div>
+  </div>`;
+
+  h += sectionHead("Welke 2 exchanges? · 7 dagen", `<span class="muted">gesorteerd op speelbare winst per dag</span>`);
+  if (pairs.length) {
+    h += `<div class="tablewrap"><table><thead><tr><th>Paar</th><th class="num" data-tip="speelbare kansen: koop links → verkoop rechts / andersom">A→B / B→A</th><th class="num" data-tip="100% = evenveel winst beide kanten op → je voorraad balanceert zichzelf">Balans</th><th class="num">Winst/dag</th><th class="num" data-tip="beide kanten op: 4× inzet (quote + munt op elke exchange); één kant op: 2× inzet">Kapitaal</th><th class="num">Rend./dag</th><th class="num">Transfers dicht</th><th class="num">Med. duur</th><th class="num" data-tip="kosten om 1 been direct terug te draaien">Leg-risico</th><th class="num" data-tip="bij dit % gemiste benen is je verwachte winst 0">Break-even</th><th class="num">Opname</th><th>Vaakst</th></tr></thead><tbody>` +
+      pairs.map(p => `<tr><td><b>${pairName(p)}</b> ${p.tradable ? '<span class="pill mine">mijn</span>' : ""}</td>
+        <td class="num">${nf(p.n_ab)} / ${nf(p.n_ba)}</td>
+        <td class="num" data-tip="${esc(`${p.a}→${p.b}: ${usd(p.profit_ab)} · ${p.b}→${p.a}: ${usd(p.profit_ba)}`)}">${p.balance == null ? "–" : nf(p.balance * 100) + "%"}</td>
+        <td class="num hot">${usd(p.profit_per_day)}</td><td class="num">${usd(p.capital_usd, 0)}</td>
+        <td class="num">${p.roi_day_pct == null ? "–" : nf(p.roi_day_pct, 2) + "%"}</td>
+        <td class="num"${p.transfer_issue_share > 0.2 ? ' style="color:var(--warn)"' : ""}>${nf(p.transfer_issue_share * 100)}%</td>
+        <td class="num">${dur(p.median_duration_s)}</td>
+        <td class="num">${p.median_unwind_pct == null ? "–" : nf(p.median_unwind_pct, 2) + "%"}</td>
+        <td class="num">${p.median_breakeven == null ? "–" : nf(p.median_breakeven * 100) + "%"}</td>
+        <td class="num">${p.median_wd_fee_usd == null ? "–" : usd(p.median_wd_fee_usd)}</td>
+        <td class="mono">${(p.top_symbols || []).map(esc).join(", ") || "–"}</td></tr>`).join("") + `</tbody></table></div>`;
+    h += `<p class="muted" style="margin-top:8px">Rendement/dag = winst per dag ÷ kapitaal dat op de exchanges moet staan. Opnamekosten zijn alleen bekend als je read-only API-keys invult.</p>`;
+  } else h += `<div class="empty">Nog geen data</div>`;
+
+  h += sectionHead("Hoe snel moet je zijn?");
+  h += `<div class="charts2">
+    <div class="chart"><h4>Hoeveel kansen staan er nog na X seconden?</h4><div class="sub">7 dagen · % van alle kansen · jij: ${latLab()}</div><div class="plot" id="c_lat"></div></div>
+    <div class="chart"><h4>Speelbare kansen per dag</h4><div class="sub">30 dagen · events, winst in de tooltip</div><div class="plot" id="c_pday"></div></div>
+  </div>`;
+  h += sectionHead("Welke inzet per arb?");
+  h += `<div class="charts2">
+    <div class="chart"><h4>Speelbare winst per dag, per inzet</h4><div class="sub">7 dagen · dikker inzetten loont alleen als het orderboek het aankan</div><div class="plot" id="c_lad"></div></div>
+    <div class="chart"><h4>Leg-risico: hoeveel misser kan je hebben?</h4><div class="sub">break-even % gemiste benen per speelbare kans · hoger = veiliger</div>
+      ${hbars((pb.breakeven_hist || []).map((b, i) => ({ label: b.label, n: b.count, color: i < 2 ? "#ff6b6b" : i < 3 ? "#f0a24b" : i < 4 ? "#e8c547" : "#34d399" })))}</div>
+  </div>`;
+  const L = pb.ladder || [];
+  if (L.length) h += `<div class="tablewrap" style="margin-top:14px"><table><thead><tr><th>Inzet</th><th class="num">Winst/dag</th><th class="num" data-tip="kapitaal = 2× inzet (quote op de koop-exchange, munten op de verkoop-exchange)">Rend./dag</th><th class="num">Med. netto</th><th class="num" data-tip="welk deel van je inzet het boek gemiddeld aankon">Med. gevuld</th><th class="num">Volledig gevuld</th></tr></thead><tbody>` +
+    L.map(x => `<tr><td><b>${usd(x.tier, 0)}</b></td><td class="num hot">${usd(x.profit_per_day)}</td><td class="num">${x.roi_day_pct == null ? "–" : nf(x.roi_day_pct, 2) + "%"}</td><td class="num">${pct(x.median_net)}</td><td class="num">${x.median_fill == null ? "–" : nf(x.median_fill * 100) + "%"}</td><td class="num">${x.full_share == null ? "–" : nf(x.full_share * 100) + "%"}</td></tr>`).join("") + `</tbody></table></div>`;
+  $("tab-strategie").innerHTML = h;
+  document.querySelectorAll("#win2 button").forEach(bt => bt.onclick = () => { S.win = bt.dataset.w; try { localStorage.setItem("jac_win", S.win); } catch (e) {} renderStrategie(); });
+  drawStrategie();
+}
+function drawStrategie() {
+  const pb = PB(); if (!pb) return;
+  const lc = pb.latency_curve || [], myL = String(rules().lat_key || "0.5");
+  const lab = (L) => L < 1 ? nf(L * 1000) + "ms" : nf(L) + "s";
+  barChart($("c_lat"), lc.map(x => lab(x.L)), [
+    { values: lc.map(x => String(x.L) === myL ? (x.share || 0) * 100 : 0), color: "var(--signal)" },
+    { values: lc.map(x => String(x.L) === myL ? 0 : (x.share || 0) * 100), color: "var(--muted-bar)" }],
+    { ymax: 100, fmtY: (v) => nf(v) + "%", labelW: 34, tipLabel: (i) => `na ${lab(lc[i].L)}: ${nf(lc[i].alive)} van ${nf(lc[i].n)} nog open<br>mediaan netto dan ${pct(lc[i].median_net)} · winst ${usd(lc[i].profit, 0)}`, fmtTip: (v) => v ? nf(v, 1) + "%" : "" });
+  const pd = S.st.per_day || [];
+  barChart($("c_pday"), pd.map(d => d.d), [{ values: pd.map(d => d.count_play || 0), color: "var(--signal)" }],
+    { tipLabel: (i) => `${pd[i].d} · winst ${usd(pd[i].profit_play)}` });
+  const L = pb.ladder || [];
+  barChart($("c_lad"), L.map(x => usdS(x.tier)), [{ values: L.map(x => x.profit_per_day), color: "var(--signal)" }],
+    { money: true, fmtY: (v) => "$" + nf(v), fmtTip: (v) => usd(v) + " per dag", labelW: 34, tipLabel: (i) => `inzet ${usd(L[i].tier, 0)} · ${L[i].roi_day_pct == null ? "" : nf(L[i].roi_day_pct, 2) + "% rendement/dag"}` });
+}
+
 function renderRoutes() {
   const E = execS();
   const head = (n) => `<thead><tr><th>${n}</th><th>Risico</th><th class="num">Aantal</th><th class="num">≥${nf(E)}s</th><th class="num">Med. netto</th><th class="num">Med. duur</th><th class="num">Winst</th></tr></thead>`;
@@ -618,6 +708,12 @@ function renderUitleg() {
     <li>Bij elke kans staat 🔔 <b>gemeld</b> of 🔕 met de reden: bijvoorbeeld netto onder de drempel, risico te hoog, opnemen dicht, cooldown, of "bestond korter dan Xs".</li>
     <li>Het dashboard toont <b>alles vanaf ${pct(s.min_net_pct)}</b> (de meetdrempel). Telegram meldt alleen wat aan al je alert-criteria voldoet.</li>
     <li>In Telegram geeft <b>🩺 Diagnose</b> hetzelfde overzicht, en <b>🔔 Test-alert</b> controleert of berichten aankomen.</li>
+  </ul></div>` + sectionHead("Strategie-tab: wat betekenen de nieuwe cijfers?") + `<div class="card note"><ul>
+    <li><b>Speelbaar</b> = de kans stond er na ${latLab()} nog (de tijd tussen zien en je order op de beurs), met netto ≥ ${pct(rules().min_net_pct)}, risico t/m ${RISK[rules().max_risk ?? 1].toLowerCase()}${rules().require_transfers_open ? " en open transfers" : ""}. De winst is wat er op dat moment nog stond, niet de piek.</li>
+    <li><b>Hoe snel moet je zijn?</b> De scanner bewaart van elke kans een tijdreeks. Daaruit zie je hoeveel procent er na 0,1 / 0,25 / 0,5 / 1 / 2 … seconden nog stond. Alleen websocket-paren zijn op ~0,1 s nauwkeurig; REST-paren op de scan-interval.</li>
+    <li><b>Inzet-ladder</b>: winst bij $100 t/m $5000 inzet, in één keer door het orderboek gerekend. Groeit de winst niet mee met je inzet, dan is het boek te dun. Kapitaal = 2× inzet (quote op de ene exchange, munten op de andere).</li>
+    <li><b>Leg-risico</b>: als één been gevuld wordt en het andere niet, draai je het gevulde been direct terug. Dat kost spread + 2× fee op die exchange. <b>Break-even</b> = bij welk percentage gemiste benen je verwachte winst nul wordt. Onder ±30% is krap.</li>
+    <li><b>Exchange-paren</b>: per combinatie hoeveel speelbare winst er was in beide richtingen. Hoge <b>balans</b> betekent dat de kansen beide kanten op gaan, zodat je voorraad zichzelf terugschuift. Dan heb je wel 4× inzet nodig (quote én munt op beide exchanges). Lage balans = je moet regelmatig munten overmaken (zie <b>opname</b>).</li>
   </ul></div>`;
 }
 
@@ -625,7 +721,7 @@ function renderUitleg() {
 function render() {
   if (!S.st) return;
   renderHeader();
-  const fns = { home: renderHome, kansen: renderKansen, analyse: renderAnalyse, routes: renderRoutes, exchanges: renderExchanges, uitleg: renderUitleg };
+  const fns = { home: renderHome, kansen: renderKansen, analyse: renderAnalyse, strategie: renderStrategie, routes: renderRoutes, exchanges: renderExchanges, uitleg: renderUitleg };
   // Kansen-tab niet opnieuw opbouwen tijdens typen in filters
   if (S.tab === "kansen" && $("q") && document.activeElement && document.activeElement.closest("#tab-kansen")) renderLog();
   else fns[S.tab]();
@@ -633,13 +729,13 @@ function render() {
 }
 function route() {
   const t = (location.hash || "#home").slice(1);
-  S.tab = ["home", "kansen", "analyse", "routes", "exchanges", "uitleg"].includes(t) ? t : "home";
+  S.tab = ["home", "kansen", "analyse", "strategie", "routes", "exchanges", "uitleg"].includes(t) ? t : "home";
   document.querySelectorAll("#tabs a").forEach(a => a.classList.toggle("active", a.dataset.tab === S.tab));
   document.querySelectorAll("main > section").forEach(s => { s.hidden = s.id !== "tab-" + S.tab; });
   render();
 }
 addEventListener("hashchange", route);
-let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (S.tab === "analyse") drawAnalyse(); if (S.tab === "home") renderHome(); }, 150); });
+let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (S.tab === "analyse") drawAnalyse(); if (S.tab === "strategie") drawStrategie(); if (S.tab === "home") renderHome(); }, 150); });
 route();
 load().then(route);
 setInterval(() => { if (!window.__STATE__ && !S.demo) load(); }, CONFIG.refreshSeconds * 1000);
